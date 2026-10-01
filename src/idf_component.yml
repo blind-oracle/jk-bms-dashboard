@@ -1,0 +1,5 @@
+dependencies:
+  idf: ">=6.1"
+  espressif/esp_lvgl_port: "~2.9.0"
+  # ~9.6.0 means >=9.6.0,==9.6.*: keeps LVGL 10 (which drops the API maps) out
+  lvgl/lvgl: "~9.6.0"

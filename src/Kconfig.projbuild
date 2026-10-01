@@ -1,0 +1,228 @@
+menu "BMS Dashboard"
+
+    menu "Pins"
+        config BMSD_PIN_LCD_SCLK
+            int "LCD SCL (SPI clock) GPIO"
+            range 0 30
+            default 23
+        config BMSD_PIN_LCD_MOSI
+            int "LCD SDA (SPI MOSI) GPIO"
+            range 0 30
+            default 22
+        config BMSD_PIN_LCD_CS
+            int "LCD CS GPIO"
+            range 0 30
+            default 21
+        config BMSD_PIN_LCD_DC
+            int "LCD DC GPIO"
+            range 0 30
+            default 20
+        config BMSD_PIN_LCD_RST
+            int "LCD RES (reset) GPIO"
+            range 0 30
+            default 19
+        config BMSD_PIN_LCD_BL
+            int "LCD BLK (backlight) GPIO"
+            range 0 30
+            default 1
+            help
+                An LP GPIO (0-7) is recommended: its pad hold during deep sleep is
+                guaranteed, so the backlight can never come on while the board sleeps.
+        config BMSD_PIN_LCD_PWR
+            int "LCD power switch GPIO (-1 = not used)"
+            range -1 30
+            default -1
+            help
+                Optional GPIO that drives a load switch (for example a P-MOSFET high-side
+                switch) in the display's VCC line. When used, the display is powered off
+                completely during deep sleep. See README.md for the circuit.
+        config BMSD_LCD_PWR_ACTIVE_HIGH
+            bool "LCD power switch is active-high"
+            default n
+            help
+                Leave disabled for a P-MOSFET high-side switch (GPIO low = display on).
+                Only used when the LCD power switch GPIO is set.
+        config BMSD_PIN_BUTTON
+            int "Button GPIO (LP GPIO 0-7, button wired to GND)"
+            range 0 7
+            default 3
+            help
+                Must be an LP GPIO (0-7): only those can wake the ESP32-C6 from deep sleep.
+                GPIO0 is taken by the board's battery sense divider.
+        config BMSD_PIN_BMS_RX
+            int "BMS UART RX GPIO (connect to the BMS TX pin)"
+            range 0 30
+            default 4
+        config BMSD_PIN_BMS_TX
+            int "BMS UART TX GPIO (connect to the BMS RX pin)"
+            range 0 30
+            default 5
+        config BMSD_PIN_VBAT_ADC
+            int "Board battery sense GPIO (ADC1)"
+            range 0 6
+            default 0
+    endmenu
+
+    menu "Timing"
+        config BMSD_SLEEP_TIMEOUT_S
+            int "Inactivity timeout before deep sleep, s (0 = never sleep)"
+            range 0 86400
+            default 300
+        config BMSD_SLEEP_WARN_S
+            int "Dim the screen and warn this many seconds before sleeping"
+            range 0 60
+            default 10
+            help
+                Any button press during the warning cancels the sleep and is
+                otherwise ignored. 0 disables the warning.
+        config BMSD_POLL_INTERVAL_MS
+            int "BMS poll interval, ms"
+            range 200 10000
+            default 1000
+        config BMSD_BMS_RX_TIMEOUT_MS
+            int "BMS reply timeout, ms"
+            range 50 2000
+            default 500
+        config BMSD_BMS_OFFLINE_POLLS
+            int "Consecutive failed polls before the BMS is shown as offline"
+            range 1 20
+            default 3
+    endmenu
+
+    menu "Button"
+        config BMSD_HOLD_START_MS
+            int "Hold time before the output-toggle card appears, ms"
+            range 200 2000
+            default 500
+            help
+                Releasing earlier than this is a short press (next page).
+        config BMSD_LONG_PRESS_MS
+            int "Hold time that arms the output toggle, ms"
+            range 800 10000
+            default 2000
+            help
+                Must be at least 500 ms longer than the hold-start time.
+        config BMSD_ARM_WINDOW_MS
+            int "Release window after arming, ms"
+            range 1000 10000
+            default 3000
+            help
+                Release within this window to switch the output. Holding longer
+                cancels, so a stuck button never toggles the output.
+    endmenu
+
+    menu "Display"
+        config BMSD_LCD_SPI_MHZ
+            int "SPI clock, MHz"
+            range 10 80
+            default 40
+            help
+                40 MHz is safe through the GPIO matrix. Below 10 MHz a full-screen
+                refresh would hold the LVGL lock long enough to drop UI updates.
+        config BMSD_LCD_SPI_MODE
+            int "SPI mode"
+            range 0 3
+            default 0
+        config BMSD_LCD_INVERT
+            bool "Invert colors (most IPS panels need this)"
+            default y
+        config BMSD_LCD_BGR
+            bool "Panel uses BGR element order"
+            default n
+        choice BMSD_LCD_ROTATION
+            prompt "Rotation"
+            default BMSD_LCD_ROTATION_0
+            config BMSD_LCD_ROTATION_0
+                bool "0 degrees"
+            config BMSD_LCD_ROTATION_90
+                bool "90 degrees"
+            config BMSD_LCD_ROTATION_180
+                bool "180 degrees"
+            config BMSD_LCD_ROTATION_270
+                bool "270 degrees"
+        endchoice
+        config BMSD_LCD_GAP_X
+            int "Column offset (240x240 glass on 240x320 controller RAM)"
+            range 0 80
+            default 80 if BMSD_LCD_ROTATION_270
+            default 0
+        config BMSD_LCD_GAP_Y
+            int "Row offset (240x240 glass on 240x320 controller RAM)"
+            range 0 80
+            default 80 if BMSD_LCD_ROTATION_180
+            default 0
+        config BMSD_LCD_BL_ACTIVE_HIGH
+            bool "Backlight is active-high"
+            default y
+        config BMSD_LCD_BRIGHTNESS_PCT
+            int "Backlight brightness, %"
+            range 1 100
+            default 100
+        config BMSD_LCD_DIM_PCT
+            int "Backlight brightness during the sleep warning, %"
+            range 0 100
+            default 20
+        config BMSD_LCD_FAST_WAKE
+            bool "Fast display wake (skip reset and init after deep sleep)"
+            default y
+            help
+                The panel keeps its registers and frame memory in sleep-in mode while
+                VCC stays on, so after a button wake only SLPOUT is needed. Disable if
+                the picture is wrong after waking. Not used with the LCD power switch.
+    endmenu
+
+    menu "BMS"
+        choice BMSD_JK_FRAME_SOURCE
+            prompt "Request frame source byte"
+            default BMSD_JK_FRAME_SOURCE_GPS
+            help
+                Try PC (0x03) if the BMS does not answer.
+            config BMSD_JK_FRAME_SOURCE_GPS
+                bool "GPS (0x02), as current esphome-jk-bms"
+            config BMSD_JK_FRAME_SOURCE_PC
+                bool "PC (0x03)"
+        endchoice
+        config BMSD_JK_WRITE_DELAY_MS
+            int "Delay between the password and write frames, ms"
+            range 100 1000
+            default 200
+        config BMSD_JK_SEND_ACTIVATION
+            bool "Send the activation frame (0x01) while the BMS is offline"
+            default n
+            help
+                Described by the JK protocol document for a hibernating BMS, but
+                not used by any known implementation. Untested.
+    endmenu
+
+    menu "Board battery"
+        config BMSD_VBAT_DIVIDER_X1000
+            int "Divider ratio x1000 (Vbat = Vpin * ratio / 1000)"
+            range 1000 10000
+            default 2000
+        config BMSD_VBAT_OFFSET_MV
+            int "Calibration offset added to the reading, mV"
+            range -500 500
+            default 0
+        config BMSD_VBAT_WARN_MV
+            int "Low-battery warning threshold, mV"
+            range 2800 4200
+            default 3400
+        config BMSD_VBAT_SAMPLES
+            int "ADC samples averaged per reading"
+            range 1 64
+            default 16
+    endmenu
+
+    menu "Development"
+        config BMSD_DEMO_MODE
+            bool "Demo mode (synthetic BMS data, UART not used)"
+            default n
+        config BMSD_NO_SLEEP_WITH_USB_HOST
+            bool "Do not deep-sleep while a USB host is connected"
+            default n
+            help
+                Convenient while developing: the USB port disappears in deep sleep.
+                A plain USB charger does not count as a host.
+    endmenu
+
+endmenu
