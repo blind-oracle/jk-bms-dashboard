@@ -52,11 +52,11 @@ menu "BMS Dashboard"
         config BMSD_PIN_BMS_RX
             int "BMS UART RX GPIO (connect to the BMS TX pin)"
             range 0 30
-            default 4
+            default 6
         config BMSD_PIN_BMS_TX
             int "BMS UART TX GPIO (connect to the BMS RX pin)"
             range 0 30
-            default 5
+            default 7
         config BMSD_PIN_VBAT_ADC
             int "Board battery sense GPIO (ADC1)"
             range 0 6
