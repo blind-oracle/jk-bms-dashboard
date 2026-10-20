@@ -1,47 +1,99 @@
 menu "BMS Dashboard"
 
+    choice BMSD_DISPLAY
+        prompt "Display"
+        default BMSD_DISPLAY_ST7789
+        help
+            Each PlatformIO environment selects one: dfrobot_firebeetle2_esp32c6 builds
+            the ST7789 TFT, dfrobot_firebeetle2_esp32c6_oled the SSD1309 OLED
+            (sdkconfig.defaults.oled).
+        config BMSD_DISPLAY_ST7789
+            bool "ST7789 240x240 SPI TFT"
+        config BMSD_DISPLAY_SSD1309
+            bool "SSD1309 128x64 I2C OLED, used as 64x128 portrait"
+    endchoice
+
     menu "Pins"
         config BMSD_PIN_LCD_SCLK
+            depends on BMSD_DISPLAY_ST7789
             int "LCD SCL (SPI clock) GPIO"
             range 0 30
             default 23
         config BMSD_PIN_LCD_MOSI
+            depends on BMSD_DISPLAY_ST7789
             int "LCD SDA (SPI MOSI) GPIO"
             range 0 30
             default 22
         config BMSD_PIN_LCD_CS
+            depends on BMSD_DISPLAY_ST7789
             int "LCD CS GPIO"
             range 0 30
             default 21
         config BMSD_PIN_LCD_DC
+            depends on BMSD_DISPLAY_ST7789
             int "LCD DC GPIO"
             range 0 30
             default 20
         config BMSD_PIN_LCD_RST
+            depends on BMSD_DISPLAY_ST7789
             int "LCD RES (reset) GPIO"
             range 0 30
             default 19
         config BMSD_PIN_LCD_BL
+            depends on BMSD_DISPLAY_ST7789
             int "LCD BLK (backlight) GPIO"
             range 0 30
             default 1
             help
                 An LP GPIO (0-7) is recommended: its pad hold during deep sleep is
                 guaranteed, so the backlight can never come on while the board sleeps.
+        config BMSD_PIN_OLED_SDA
+            depends on BMSD_DISPLAY_SSD1309
+            int "OLED SDA GPIO"
+            range 0 30
+            default 19
+        config BMSD_PIN_OLED_SCL
+            depends on BMSD_DISPLAY_SSD1309
+            int "OLED SCL GPIO"
+            range 0 30
+            default 20
+        config BMSD_PIN_OLED_RST
+            depends on BMSD_DISPLAY_SSD1309
+            int "OLED RES GPIO (-1 = not connected)"
+            range -1 30
+            default -1
+            help
+                The 5-pin I2C modules reset themselves with an RC circuit at power-up,
+                so RES can stay unconnected.
         config BMSD_PIN_LCD_PWR
             int "LCD power switch GPIO (-1 = not used)"
             range -1 30
             default -1
             help
-                Optional GPIO that drives a load switch (for example a P-MOSFET high-side
-                switch) in the display's VCC line. When used, the display is powered off
-                completely during deep sleep. See README.md for the circuit.
+                Optional GPIO that drives a switch in the display's power: a P-MOSFET or
+                PNP transistor in its VCC line (high-side), or an NPN transistor or
+                N-MOSFET in its GND line (low-side, see BMSD_LCD_PWR_LOW_SIDE). When used,
+                the display is powered off completely during deep sleep. See README.md
+                for the circuits. Strongly recommended for the SSD1309 OLED: its
+                module's boost converter draws milliamps whenever the module is powered.
         config BMSD_LCD_PWR_ACTIVE_HIGH
             bool "LCD power switch is active-high"
             default n
             help
-                Leave disabled for a P-MOSFET high-side switch (GPIO low = display on).
-                Only used when the LCD power switch GPIO is set.
+                Leave disabled for a P-MOSFET or PNP high-side switch (GPIO low =
+                display on). Set automatically by BMSD_LCD_PWR_LOW_SIDE. Only used when
+                the LCD power switch GPIO is set.
+        config BMSD_LCD_PWR_LOW_SIDE
+            bool "LCD power switch is in the display's GND line (NPN / N-MOSFET)"
+            default n
+            select BMSD_LCD_PWR_ACTIVE_HIGH
+            help
+                Enable for a low-side switch (for example a BC337) that cuts the
+                display's GND instead of its VCC. The display lines are then held high
+                in deep sleep instead of low: low lines would give the unpowered module
+                a ground through its I/O pins, and it would keep running from them.
+                GPIO high = display on (BMSD_LCD_PWR_ACTIVE_HIGH is set with it). Only
+                used when the LCD power switch GPIO is set.
         config BMSD_PIN_BUTTON
             int "Button GPIO (LP GPIO 0-7, button wired to GND)"
             range 0 7
@@ -113,6 +165,7 @@ menu "BMS Dashboard"
 
     menu "Display"
         config BMSD_LCD_SPI_MHZ
+            depends on BMSD_DISPLAY_ST7789
             int "SPI clock, MHz"
             range 10 80
             default 40
@@ -120,17 +173,21 @@ menu "BMS Dashboard"
                 40 MHz is safe through the GPIO matrix. Below 10 MHz a full-screen
                 refresh would hold the LVGL lock long enough to drop UI updates.
         config BMSD_LCD_SPI_MODE
+            depends on BMSD_DISPLAY_ST7789
             int "SPI mode"
             range 0 3
             default 0
         config BMSD_LCD_INVERT
+            depends on BMSD_DISPLAY_ST7789
             bool "Invert colors (most IPS panels need this)"
             default y
         config BMSD_LCD_BGR
+            depends on BMSD_DISPLAY_ST7789
             bool "Panel uses BGR element order"
             default n
         choice BMSD_LCD_ROTATION
             prompt "Rotation"
+            depends on BMSD_DISPLAY_ST7789
             default BMSD_LCD_ROTATION_0
             config BMSD_LCD_ROTATION_0
                 bool "0 degrees"
@@ -142,27 +199,50 @@ menu "BMS Dashboard"
                 bool "270 degrees"
         endchoice
         config BMSD_LCD_GAP_X
+            depends on BMSD_DISPLAY_ST7789
             int "Column offset (240x240 glass on 240x320 controller RAM)"
             range 0 80
             default 80 if BMSD_LCD_ROTATION_270
             default 0
         config BMSD_LCD_GAP_Y
+            depends on BMSD_DISPLAY_ST7789
             int "Row offset (240x240 glass on 240x320 controller RAM)"
             range 0 80
             default 80 if BMSD_LCD_ROTATION_180
             default 0
         config BMSD_LCD_BL_ACTIVE_HIGH
+            depends on BMSD_DISPLAY_ST7789
             bool "Backlight is active-high"
             default y
         config BMSD_LCD_BRIGHTNESS_PCT
-            int "Backlight brightness, %"
+            int "Brightness, % (backlight; contrast on the OLED)"
             range 1 100
             default 100
         config BMSD_LCD_DIM_PCT
-            int "Backlight brightness during the sleep warning, %"
+            int "Brightness during the sleep warning, %"
             range 0 100
             default 20
+        config BMSD_OLED_I2C_ADDR
+            depends on BMSD_DISPLAY_SSD1309
+            hex "OLED I2C address"
+            range 0x3C 0x3D
+            default 0x3C
+            help
+                0x3C (written 0x78 on many modules) or 0x3D (0x7A).
+        config BMSD_OLED_I2C_KHZ
+            depends on BMSD_DISPLAY_SSD1309
+            int "OLED I2C clock, kHz"
+            range 100 1000
+            default 400
+        config BMSD_OLED_FLIP
+            depends on BMSD_DISPLAY_SSD1309
+            bool "Flip the portrait picture by 180 degrees"
+            default n
+            help
+                The 128x64 panel is used as 64x128 portrait. Enable this if the picture
+                is upside down for the way the module is mounted.
         config BMSD_LCD_FAST_WAKE
+            depends on BMSD_DISPLAY_ST7789
             bool "Fast display wake (skip reset and init after deep sleep)"
             default y
             help

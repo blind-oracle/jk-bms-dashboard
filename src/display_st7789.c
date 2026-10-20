@@ -1,4 +1,5 @@
 // ST7789 240x240 over SPI2 + LVGL (esp_lvgl_port) + LEDC backlight.
+// Built when BMSD_DISPLAY_ST7789 is selected.
 //
 // Init order: backlight PWM at duty 0 -> optional panel power -> SPI bus,
 // panel IO, ST7789 -> full init (reset) or fast wake (SLPOUT only) ->
@@ -19,6 +20,7 @@
 #include "esp_lcd_panel_st7789.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "app_config.h"
@@ -360,4 +362,56 @@ void display_prepare_deep_sleep(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "SLPIN: %s", esp_err_to_name(err));
     }
+}
+
+// ---- Deep-sleep pins and driver-free parking (used by power.c) ----
+
+#define LCD_RST_PULSE_MS        10
+
+// Panel left powered in SLPIN: CS, DC and RES high, clock and data low, backlight
+// off. With the power switch every line has the same level: low for a switch in
+// VCC, so the unpowered panel is not back-fed; high for a switch in GND, so the
+// panel finds no ground through its pins. Either is harmless for the backlight
+// while the panel has no supply.
+size_t display_sleep_pins(display_pin_level_t *out, size_t cap)
+{
+    const bool sw = APP_LCD_PWR_USED;
+    const uint8_t off = APP_LCD_PWR_OFF_LINE_LEVEL;
+    const display_pin_level_t pins[] = {
+        { .pin = APP_PIN_LCD_PWR,  .level = 1 - APP_LCD_PWR_ON_LEVEL },     // only if used
+        { .pin = APP_PIN_LCD_BL,   .level = sw ? off : APP_LCD_BL_OFF_LEVEL },
+        { .pin = APP_PIN_LCD_CS,   .level = sw ? off : 1 },
+        { .pin = APP_PIN_LCD_DC,   .level = sw ? off : 1 },
+        { .pin = APP_PIN_LCD_RST,  .level = sw ? off : 1 },
+        { .pin = APP_PIN_LCD_SCLK, .level = sw ? off : 0 },
+        { .pin = APP_PIN_LCD_MOSI, .level = sw ? off : 0 },
+    };
+    size_t n = 0;
+    for (size_t i = sw ? 0 : 1; i < sizeof(pins) / sizeof(pins[0]) && n < cap; i++) {
+        out[n++] = pins[i];
+    }
+    return n;
+}
+
+static void park_drive(int pin, uint32_t level)
+{
+    gpio_set_level((gpio_num_t)pin, level);
+    gpio_set_pull_mode((gpio_num_t)pin, GPIO_FLOATING);
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+    gpio_hold_dis((gpio_num_t)pin);
+}
+
+// A RES pulse puts the ST7789 in its reset state (sleep-in, display off), with
+// the backlight off and CS high first. With the power switch the panel is simply
+// left unpowered by the sleep pin levels.
+void display_park_panel(void)
+{
+    if (APP_LCD_PWR_USED) {
+        return;
+    }
+    park_drive(APP_PIN_LCD_BL, APP_LCD_BL_OFF_LEVEL);
+    park_drive(APP_PIN_LCD_CS, 1);
+    park_drive(APP_PIN_LCD_RST, 0);
+    esp_rom_delay_us(LCD_RST_PULSE_MS * 1000);
+    park_drive(APP_PIN_LCD_RST, 1);
 }

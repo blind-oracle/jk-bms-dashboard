@@ -1036,6 +1036,10 @@ CONFIG_PARTITION_TABLE_MD5=y
 #
 # BMS Dashboard
 #
+# default:
+CONFIG_BMSD_DISPLAY_ST7789=y
+# default:
+# CONFIG_BMSD_DISPLAY_SSD1309 is not set
 
 #
 # Pins
@@ -1056,6 +1060,8 @@ CONFIG_BMSD_PIN_LCD_BL=1
 CONFIG_BMSD_PIN_LCD_PWR=-1
 # default:
 # CONFIG_BMSD_LCD_PWR_ACTIVE_HIGH is not set
+# default:
+# CONFIG_BMSD_LCD_PWR_LOW_SIDE is not set
 # default:
 CONFIG_BMSD_PIN_BUTTON=3
 # default:

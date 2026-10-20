@@ -2,8 +2,12 @@
 
 Firmware for a small battery-powered display that shows live data from a
 JK-B/BD BMS (the "JK BMS" with the 4-pin GPS port). It is built for the
-DFRobot FireBeetle 2 ESP32-C6 and a 240x240 ST7789 SPI display, with one
-push button.
+DFRobot FireBeetle 2 ESP32-C6 with one push button and one of two displays,
+each with its own build environment:
+
+- a 240x240 ST7789 SPI colour TFT (`dfrobot_firebeetle2_esp32c6`, the default);
+- a 2.42" SSD1309 128x64 I2C monochrome OLED, used upright as 64x128
+  (`dfrobot_firebeetle2_esp32c6_oled`). See [SSD1309 OLED](#ssd1309-oled).
 
 What it does:
 
@@ -26,12 +30,13 @@ dashboard sleeps.
 |---|---|
 | DFRobot FireBeetle 2 ESP32-C6 (DFR1075) | ESP32-C6, 4 MB flash, USB-C, Li-ion charger, battery connector |
 | 240x240 ST7789 SPI display module, 8 pins | Pins: GND, VCC, SCL, SDA, RES, DC, CS, BLK. Usually sold as a 1.3" or 1.54" IPS module. The module must have a CS pin. |
+| *or* 2.42" SSD1309 OLED module, 5-pin I2C | Pins: GND, VCC, SCL, SDA, RES. 128x64. Needs the P-MOSFET power switch below. |
 | Momentary push button | Normally open |
 | Single-cell Li-ion/LiPo battery | Fits the FireBeetle battery connector (JST PH 2.0). The board charges it from USB. |
 | JK BMS GPS-port cable | 4-pin 1.25 mm pitch JST-style plug on the BMS side |
 | Optional: 100 kΩ resistor | External pull-up for the button |
 | Optional: ADUM1201 digital isolator | UART isolation, see [Safety](#safety) |
-| Optional: AO3401 P-MOSFET + 100 kΩ resistor | Display power switch for the lowest sleep current, see [Sleep current](#deep-sleep-and-sleep-current) |
+| AO3401 P-MOSFET + 100 kΩ resistor, or BC337 NPN + 1 kΩ and 47 kΩ resistors | Display power switch. Optional for the TFT (lowest sleep current, see [Sleep current](#deep-sleep-and-sleep-current)), required for the OLED. |
 
 ## Wiring
 
@@ -50,6 +55,51 @@ dashboard sleeps.
 
 GPIO20 and GPIO19 also appear on the right header as "SCL" and "SDA" (I2C).
 Leave those pads unconnected.
+
+### Display (2.42" SSD1309 I2C OLED, OLED build only)
+
+| OLED pin | FireBeetle | Silk on the board |
+|---|---|---|
+| VCC | Drain of the P-MOSFET switch (see below) | - |
+| GND | GND | GND |
+| SCL | GPIO20 | SCL (also 20/SCL) |
+| SDA | GPIO19 | SDA (also 19/SDA) |
+| RES | Not connected | - |
+
+The P-MOSFET switch in the module's VCC line:
+
+| AO3401 (P-MOSFET) pin | Connect to |
+|---|---|
+| Source (S) | 3V3 |
+| Drain (D) | OLED VCC |
+| Gate (G) | GPIO18 (silk 18/D7), plus a 100 kΩ resistor to 3V3 |
+
+**Alternative: a BC337 NPN transistor in the GND lead.** The module's VCC then
+goes straight to 3V3, and the transistor switches its GND:
+
+| BC337 (NPN) pin | Connect to |
+|---|---|
+| Emitter (E) | GND |
+| Collector (C) | OLED GND (instead of GND) |
+| Base (B) | 1 kΩ to GPIO18, plus 47 kΩ from the base to GND |
+
+Set `BMSD_LCD_PWR_LOW_SIDE=y` (it also sets `BMSD_LCD_PWR_ACTIVE_HIGH`: GPIO high
+= display on). The firmware then holds SDA and SCL high in deep sleep instead of
+low. **Never wire the switch into GND without this setting:** low lines would
+give the unpowered module a ground through its I2C pins, and it would keep
+drawing milliamps through them. The 47 kΩ resistor keeps the display off while
+the board boots. Compared with the P-MOSFET, the transistor takes about 2.6 mA
+of base current while the board is awake (nothing in sleep), and the module's
+ground sits 0.1-0.2 V above the board's, which the I2C levels tolerate.
+
+A BC327 PNP transistor can replace the AO3401 directly, with the same settings:
+emitter to 3V3, collector to OLED VCC, base through 1 kΩ to GPIO18 and 47 kΩ
+from the base to the emitter.
+
+The module resets itself at power-up (an RC on its RES line), so RES can stay
+unconnected. Most modules ship in I2C mode at address 0x3C (written "0x78" on
+the board); some need resistors moved or a jumper set for I2C, so check the
+seller's notes.
 
 ### Button
 
@@ -70,8 +120,8 @@ The port labels are as printed on the BMS side.
 | BMS GPS port | FireBeetle |
 |---|---|
 | GND | GND |
-| TX | GPIO4 (silk 4/A3/LP_RX), the ESP32 RX |
-| RX | GPIO5 (silk 5/A4/LP_TX), the ESP32 TX |
+| TX | GPIO6, the ESP32 RX |
+| RX | GPIO7, the ESP32 TX |
 | VBAT | **Not connected** |
 
 The UART runs at 115200 baud, 8N1, 3.3 V logic. Connect it directly: no level
@@ -130,6 +180,11 @@ their versions; commit it.
 | Configuration menu | `pio run -t menuconfig` |
 | Host unit tests (protocol parser) | `pio test -e native` |
 
+These commands build the ST7789 TFT firmware. For the OLED, add
+`-e dfrobot_firebeetle2_esp32c6_oled`, for example
+`pio run -e dfrobot_firebeetle2_esp32c6_oled -t upload` or
+`pio run -e dfrobot_firebeetle2_esp32c6_oled -t menuconfig`.
+
 The console is on the native USB-C port (USB-Serial/JTAG). The baud rate does
 not matter. The host tests need a C compiler on the host (gcc or clang).
 
@@ -152,6 +207,11 @@ saved to `sdkconfig.dfrobot_firebeetle2_esp32c6`, and the next build uses them.
 To make a setting the project default, put it in `sdkconfig.defaults`
 (for example `CONFIG_BMSD_SLEEP_TIMEOUT_S=60`).
 
+The OLED environment has its own `sdkconfig.dfrobot_firebeetle2_esp32c6_oled`.
+Its defaults are `sdkconfig.defaults` plus `sdkconfig.defaults.oled`, which
+selects the OLED (`BMSD_DISPLAY_SSD1309`), the power switch on GPIO18 and the
+pixel fonts. The rules below apply to it in the same way.
+
 Two build-system rules apply:
 
 - Changes to `sdkconfig.defaults` do not reliably reach an existing
@@ -170,17 +230,21 @@ menuconfig to search for one.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `BMSD_PIN_LCD_SCLK` | 23 | LCD SCL (SPI clock) |
-| `BMSD_PIN_LCD_MOSI` | 22 | LCD SDA (SPI data) |
-| `BMSD_PIN_LCD_CS` | 21 | LCD CS |
-| `BMSD_PIN_LCD_DC` | 20 | LCD DC |
-| `BMSD_PIN_LCD_RST` | 19 | LCD RES |
-| `BMSD_PIN_LCD_BL` | 1 | LCD BLK (backlight). An LP GPIO (0-7) is recommended: its hold in deep sleep is guaranteed. |
-| `BMSD_PIN_LCD_PWR` | -1 | Optional display power switch, -1 = not used |
-| `BMSD_LCD_PWR_ACTIVE_HIGH` | n | Leave off for a P-MOSFET high-side switch (GPIO low = display on) |
+| `BMSD_PIN_LCD_SCLK` | 23 | TFT only. LCD SCL (SPI clock) |
+| `BMSD_PIN_LCD_MOSI` | 22 | TFT only. LCD SDA (SPI data) |
+| `BMSD_PIN_LCD_CS` | 21 | TFT only. LCD CS |
+| `BMSD_PIN_LCD_DC` | 20 | TFT only. LCD DC |
+| `BMSD_PIN_LCD_RST` | 19 | TFT only. LCD RES |
+| `BMSD_PIN_LCD_BL` | 1 | TFT only. LCD BLK (backlight). An LP GPIO (0-7) is recommended: its hold in deep sleep is guaranteed. |
+| `BMSD_PIN_OLED_SDA` | 19 | OLED only. I2C SDA |
+| `BMSD_PIN_OLED_SCL` | 20 | OLED only. I2C SCL |
+| `BMSD_PIN_OLED_RST` | -1 | OLED only. RES, -1 = not connected |
+| `BMSD_PIN_LCD_PWR` | -1 (OLED: 18) | Display power switch, -1 = not used |
+| `BMSD_LCD_PWR_ACTIVE_HIGH` | n | Leave off for a P-MOSFET or PNP high-side switch (GPIO low = display on) |
+| `BMSD_LCD_PWR_LOW_SIDE` | n | The switch is in the display's GND line (NPN / N-MOSFET, for example a BC337). Display lines are held high in sleep instead of low. Sets `BMSD_LCD_PWR_ACTIVE_HIGH`. |
 | `BMSD_PIN_BUTTON` | 3 | Button to GND. Must be GPIO0-7. |
-| `BMSD_PIN_BMS_RX` | 4 | ESP32 RX, to the BMS TX pin |
-| `BMSD_PIN_BMS_TX` | 5 | ESP32 TX, to the BMS RX pin |
+| `BMSD_PIN_BMS_RX` | 6 | ESP32 RX, to the BMS TX pin |
+| `BMSD_PIN_BMS_TX` | 7 | ESP32 TX, to the BMS RX pin |
 | `BMSD_PIN_VBAT_ADC` | 0 | Board battery sense (ADC1) |
 
 **Timing**
@@ -205,17 +269,21 @@ menuconfig to search for one.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `BMSD_LCD_SPI_MHZ` | 40 | SPI clock, 10-80 MHz |
-| `BMSD_LCD_SPI_MODE` | 0 | SPI mode (0-3) |
-| `BMSD_LCD_INVERT` | y | Invert colours (most IPS panels need this) |
-| `BMSD_LCD_BGR` | n | Panel uses BGR element order |
-| `BMSD_LCD_ROTATION` | 0° | 0°, 90°, 180° or 270° |
-| `BMSD_LCD_GAP_X` | 0 (80 for 270°) | Column offset of the 240x240 glass in the 240x320 controller RAM |
-| `BMSD_LCD_GAP_Y` | 0 (80 for 180°) | Row offset |
-| `BMSD_LCD_BL_ACTIVE_HIGH` | y | Backlight polarity |
-| `BMSD_LCD_BRIGHTNESS_PCT` | 100 | Normal backlight brightness |
+| `BMSD_DISPLAY` | ST7789 | Display type: `BMSD_DISPLAY_ST7789` or `BMSD_DISPLAY_SSD1309`. Each environment sets its own; leave it as is. |
+| `BMSD_LCD_SPI_MHZ` | 40 | TFT only. SPI clock, 10-80 MHz |
+| `BMSD_LCD_SPI_MODE` | 0 | TFT only. SPI mode (0-3) |
+| `BMSD_LCD_INVERT` | y | TFT only. Invert colours (most IPS panels need this) |
+| `BMSD_LCD_BGR` | n | TFT only. Panel uses BGR element order |
+| `BMSD_LCD_ROTATION` | 0° | TFT only. 0°, 90°, 180° or 270° |
+| `BMSD_LCD_GAP_X` | 0 (80 for 270°) | TFT only. Column offset of the 240x240 glass in the 240x320 controller RAM |
+| `BMSD_LCD_GAP_Y` | 0 (80 for 180°) | TFT only. Row offset |
+| `BMSD_LCD_BL_ACTIVE_HIGH` | y | TFT only. Backlight polarity |
+| `BMSD_LCD_BRIGHTNESS_PCT` | 100 | Normal brightness: backlight on the TFT, contrast on the OLED |
 | `BMSD_LCD_DIM_PCT` | 20 | Brightness during the sleep warning |
-| `BMSD_LCD_FAST_WAKE` | y | After a button wake, skip the display reset and init. Not used with the power switch. |
+| `BMSD_LCD_FAST_WAKE` | y | TFT only. After a button wake, skip the display reset and init. Not used with the power switch. |
+| `BMSD_OLED_I2C_ADDR` | 0x3C | OLED only. I2C address: 0x3C or 0x3D |
+| `BMSD_OLED_I2C_KHZ` | 400 | OLED only. I2C clock, 100-1000 kHz |
+| `BMSD_OLED_FLIP` | n | OLED only. Turn the picture by 180° |
 
 The gap follows the rotation automatically unless you have set a gap value
 yourself. In that case, set it to match: 180° needs Y=80 and 270° needs X=80.
@@ -260,7 +328,9 @@ yourself. In that case, set it to match: 180° needs Y=80 and 270° needs X=80.
 | The press that wakes the board | Wakes it, nothing else. The board always wakes on the Main page. |
 
 The times are the defaults of `BMSD_HOLD_START_MS`, `BMSD_LONG_PRESS_MS` and
-`BMSD_ARM_WINDOW_MS`.
+`BMSD_ARM_WINDOW_MS`. The messages quoted here are the TFT's. The OLED shows
+shorter ones with the same meaning, for example "Hold to disable output",
+"Release to turn OFF", "Sending", "Canceled" and "Failed, output is ON".
 
 The switch command is absolute. If the discharge output is on, the gesture
 switches it off. If it is off, the gesture switches it on. The decision is made
@@ -295,7 +365,7 @@ Results:
 A command that is not confirmed is retried once (password + write) before the
 result is shown.
 
-### Pages
+### Pages (TFT)
 
 The pages form a ring: Main, then Cells, then Alarms (only while an alarm is
 active), then Details. If the alarms clear while the Alarms page is shown, the
@@ -327,7 +397,7 @@ display returns to Main.
 Until the first frame arrives, every value shows "--". After the link is lost,
 the last values stay on screen greyed out.
 
-### Status strip
+### Status strip (TFT)
 
 The top line of every page shows:
 
@@ -388,8 +458,9 @@ Special cases:
 3. Let the board fall asleep.
 
 Expect about 16-36 µA for the board, plus the display module's sleep current.
-The 3V3 rail stays on in deep sleep, so the panel stays powered in its sleep
-mode, typically adding a few tens of µA.
+The 3V3 rail stays on in deep sleep, so without the power switch the TFT panel
+stays powered in its sleep mode, typically adding a few tens of µA. With the
+OLED and its switch, the module is fully off and adds nothing.
 
 The awake current (tens of mA) drops too much voltage across a meter's µA range,
 which can brown out the board. Short the meter, or use its mA range, while the
@@ -414,7 +485,58 @@ If the reading is much higher:
   during reset, boot and deep sleep. Set `BMSD_PIN_LCD_PWR=18` and leave
   `BMSD_LCD_PWR_ACTIVE_HIGH` off: GPIO low means the display is on. With the
   switch, all display lines are driven low during sleep, and every wake does a
-  full display init (fast wake is not used).
+  full display init (fast wake is not used). A switch in the GND line instead
+  (an NPN transistor such as a BC337) needs `BMSD_LCD_PWR_LOW_SIDE`: see the
+  OLED wiring for the circuit.
+
+## SSD1309 OLED
+
+The OLED build drives a 2.42" SSD1309 128x64 module over I2C and uses it upright,
+as 64x128 pixels: the module is turned a quarter turn from its usual landscape
+position. If the picture is upside down for the way it is mounted, enable
+`BMSD_OLED_FLIP`. Wiring is in [Wiring](#display-242-ssd1309-i2c-oled-oled-build-only).
+Build and flash it with `pio run -e dfrobot_firebeetle2_esp32c6_oled -t upload`.
+
+**Why the power switch is required.** These modules make the OLED's ~12 V panel
+supply with an on-board boost converter whose enable pin is tied to VCC. It
+runs, and draws milliamps, whenever the module has power, even with the display
+switched off. Only cutting VCC brings the module to zero. With the switch the
+module is off in deep sleep, its lines are held so that no current can flow
+(low with the switch in VCC, high with `BMSD_LCD_PWR_LOW_SIDE`), and every wake
+does a full display init. Without the switch (`BMSD_PIN_LCD_PWR=-1`) the firmware still works:
+the panel is switched off in sleep and SDA/SCL are held high, but the boost
+converter keeps draining the battery.
+
+It is a 1-bit display with 8 characters per line, so the UI is laid out
+differently from the TFT:
+
+- **No colours.** Something that is on, or needs attention, is shown inverted
+  (black on white). Outlined means tripped or a warning. Stale data keeps its
+  last values; the link marker and the Main banner show that the BMS is
+  offline.
+- **Status strip**: the page as "2/5", the BMS link marker and the board battery
+  voltage. The marker is a filled square for fresh data, an empty square when
+  it is getting old, "?" until the first frame and "x" while the BMS is
+  offline. The battery voltage is inverted and blinks when it is low.
+- **Main**: SOC in large digits with a bar; pack voltage, current and power;
+  highest and lowest cell and their difference ("Df"); MOS and battery
+  temperatures; the CH / DS / BL tags (inverted when the charge MOSFET, the
+  discharge MOSFET or the balancer is on, DS outlined when tripped); a banner
+  at the bottom with OFFLINE, "Waiting" (no frame yet) or the top alarm.
+- **Cells**: up to 12 cells per page, so 13-24 cells use two pages, split
+  evenly (16S: 8 + 8). "^" marks the highest and "v" the lowest cell when they
+  differ by 5 mV or more. The header shows the difference, and "BAL" while
+  balancing.
+- **Alarms** (only while an alarm is active): short names such as "Cell OV" or
+  "Dsg OC". OV, UV and OC mean overvoltage, undervoltage and overcurrent.
+- **Details**: temperatures, cycles, cycle Ah ("CyAh"), nominal, remaining and
+  actual Ah, CHG / DSG state (ON, OFF or TRIP for a protection holding the
+  MOSFET off), balancer (ON while balancing, IDLE, OFF), software version,
+  BMS uptime and the alarm count. Numbers too long for the line drop their
+  unit or switch to k/M ("CyAh 35k"), so digits are never cut off.
+
+The page ring is Main, Cells (1 or 2 pages), Alarms (when active), Details.
+Brightness settings set the OLED contrast.
 
 ## Troubleshooting
 
@@ -428,6 +550,8 @@ If the reading is much higher:
 | Backlight on but nothing drawn | Check SCL/SDA/CS/DC/RES wiring; try `BMSD_LCD_SPI_MHZ=20` or another `BMSD_LCD_SPI_MODE` |
 | "Connecting..." forever, or "BMS offline" | Swap RX and TX (BMS TX goes to GPIO4). Check the GND wire. Try `BMSD_JK_FRAME_SOURCE` = PC (0x03). Make sure the BMS is switched on and awake. |
 | Switching always says "No reply from BMS" | Try `BMSD_JK_FRAME_SOURCE` = PC (0x03) or a longer `BMSD_JK_WRITE_DELAY_MS` |
+| OLED stays dark | Check the power switch (OLED VCC should be 3.3 V while awake) and SDA/SCL. The serial log says "SSD1309 init (no ACK from 0x3C?)" when nothing answers: try `BMSD_OLED_I2C_ADDR=0x3D`. |
+| OLED picture upside down | Toggle `BMSD_OLED_FLIP` |
 | No USB port on the computer | The board is asleep: press the button, or hold BOOT and tap RST |
 | Board battery shows about 4.2 V | Normal while USB is connected |
 | Board restarts a few times, then stays dark until the next press | Crash-loop protection. Read the reset cause in the serial log (`pio device monitor`). |
@@ -455,10 +579,11 @@ success, no reply and "Enabled - blocked by BMS".
 
 | File | Contents |
 |---|---|
-| `platformio.ini` | Build environments: the firmware and `native` host tests |
+| `platformio.ini` | Build environments: the TFT and OLED firmware and `native` host tests |
 | `boards/dfrobot_firebeetle2_esp32c6.json` | Board definition (the platform does not ship one) |
 | `CMakeLists.txt` | ESP-IDF project file |
 | `sdkconfig.defaults` | Project defaults: flash size, console, watchdog, LVGL configuration |
+| `sdkconfig.defaults.oled` | Extra defaults of the OLED environment: display type, power switch, fonts |
 | `dependencies.lock` | Pinned versions of LVGL and esp_lvgl_port |
 | `src/CMakeLists.txt` | Component sources (listed explicitly) and IDF requirements |
 | `src/idf_component.yml` | Component manager dependencies (LVGL, esp_lvgl_port) |
@@ -470,11 +595,17 @@ success, no reply and "Enabled - blocked by BMS".
 | `src/jk_bms.c/.h` | BMS task: UART1, fixed-rate polling, snapshot, discharge switch command, demo data |
 | `src/button.c/.h` | Button state machine: short press, hold, arm, release, stuck detection |
 | `src/battery.c/.h` | Board battery voltage through the ADC with calibration |
-| `src/display.c/.h` | SPI, ST7789 panel, LVGL port, backlight PWM, fast wake, sleep preparation |
+| `src/display.h` | Display backend interface: init, LVGL lock, brightness, sleep, sleep pins |
+| `src/display_st7789.c` | TFT backend: SPI, ST7789 panel, LVGL port, backlight PWM, fast wake, sleep preparation |
+| `src/display_ssd1309.c` | OLED backend: I2C, SSD1309 init, 64x128 1-bit LVGL display, contrast, power switch |
 | `src/power.c/.h` | Wake handling, stuck-button and crash-loop paths, pin holds, deep-sleep entry |
-| `src/ui.c/.h` | UI framework: page ring, status strip, overlay card |
-| `src/ui_main.c` | Main page |
-| `src/ui_cells.c` | Cells page |
-| `src/ui_alarms.c` | Alarms page |
-| `src/ui_details.c` | Details page |
+| `src/ui.h` | UI interface shared by both UIs, including the message wording |
+| `src/ui_common.c/.h` | Helpers shared by both UIs: change-only setters, strings, alarm ranking |
+| `src/ui.c` | TFT UI framework: page ring, status strip, overlay card, wording |
+| `src/ui_main.c` | TFT Main page |
+| `src/ui_cells.c` | TFT Cells page |
+| `src/ui_alarms.c` | TFT Alarms page |
+| `src/ui_details.c` | TFT Details page |
+| `src/ui_oled.c` | OLED UI framework: page ring, status strip, overlay card, wording |
+| `src/ui_oled_pages.c` | OLED pages: Main, Cells, Alarms, Details |
 | `test/test_jk_proto/test_main.c` | Host unit tests for the protocol module (`pio test -e native`) |

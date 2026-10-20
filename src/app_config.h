@@ -9,13 +9,26 @@
 #include <assert.h>
 #include "sdkconfig.h"
 
+// --- Display type ---
+#ifdef CONFIG_BMSD_DISPLAY_SSD1309
+#define APP_DISPLAY_SSD1309 1
+#else
+#define APP_DISPLAY_SSD1309 0
+#endif
+
 // --- Pins ---
+#if APP_DISPLAY_SSD1309
+#define APP_PIN_OLED_SDA   CONFIG_BMSD_PIN_OLED_SDA
+#define APP_PIN_OLED_SCL   CONFIG_BMSD_PIN_OLED_SCL
+#define APP_PIN_OLED_RST   CONFIG_BMSD_PIN_OLED_RST     // -1 = not connected
+#else
 #define APP_PIN_LCD_SCLK   CONFIG_BMSD_PIN_LCD_SCLK
 #define APP_PIN_LCD_MOSI   CONFIG_BMSD_PIN_LCD_MOSI
 #define APP_PIN_LCD_CS     CONFIG_BMSD_PIN_LCD_CS
 #define APP_PIN_LCD_DC     CONFIG_BMSD_PIN_LCD_DC
 #define APP_PIN_LCD_RST    CONFIG_BMSD_PIN_LCD_RST
 #define APP_PIN_LCD_BL     CONFIG_BMSD_PIN_LCD_BL
+#endif
 #define APP_PIN_LCD_PWR    CONFIG_BMSD_PIN_LCD_PWR      // -1 = not used
 #define APP_PIN_BUTTON     CONFIG_BMSD_PIN_BUTTON
 #define APP_PIN_BMS_RX     CONFIG_BMSD_PIN_BMS_RX
@@ -28,6 +41,17 @@
 #define APP_LCD_PWR_ON_LEVEL 0
 #endif
 #define APP_LCD_PWR_USED (APP_PIN_LCD_PWR >= 0)
+#ifdef CONFIG_BMSD_LCD_PWR_LOW_SIDE
+#define APP_LCD_PWR_LOW_SIDE 1
+#else
+#define APP_LCD_PWR_LOW_SIDE 0
+#endif
+// Level of every display line in deep sleep while the switch has the display
+// off: low for a switch in VCC (no back-feed into the unpowered module), high
+// for a switch in GND (no ground path through the lines).
+#define APP_LCD_PWR_OFF_LINE_LEVEL (APP_LCD_PWR_LOW_SIDE ? 1 : 0)
+static_assert(!APP_LCD_PWR_LOW_SIDE || APP_LCD_PWR_ON_LEVEL == 1,
+              "a low-side display power switch (NPN / N-MOSFET) is active-high");
 
 // --- Timing ---
 #define APP_SLEEP_TIMEOUT_S     CONFIG_BMSD_SLEEP_TIMEOUT_S   // 0 = never sleep
@@ -45,14 +69,29 @@
 #define APP_BTN_STUCK_MS        10000   // wake press held this long = stuck button
 
 // --- Display ---
+#define APP_LCD_BRIGHTNESS_PCT  CONFIG_BMSD_LCD_BRIGHTNESS_PCT
+#define APP_LCD_DIM_PCT         CONFIG_BMSD_LCD_DIM_PCT
+
+#if APP_DISPLAY_SSD1309
+// 128x64 panel used as 64x128 portrait
+#define APP_OLED_W              64
+#define APP_OLED_H              128
+#define APP_OLED_I2C_ADDR       CONFIG_BMSD_OLED_I2C_ADDR
+#define APP_OLED_I2C_HZ         (CONFIG_BMSD_OLED_I2C_KHZ * 1000)
+#ifdef CONFIG_BMSD_OLED_FLIP
+#define APP_OLED_FLIP 1
+#else
+#define APP_OLED_FLIP 0
+#endif
+// The OLED is powered off in sleep or fully reinitialised: no fast wake
+#define APP_LCD_FAST_WAKE 0
+#else
 #define APP_LCD_H_RES           240
 #define APP_LCD_V_RES           240
 #define APP_LCD_SPI_HZ          (CONFIG_BMSD_LCD_SPI_MHZ * 1000 * 1000)
 #define APP_LCD_SPI_MODE        CONFIG_BMSD_LCD_SPI_MODE
 #define APP_LCD_GAP_X           CONFIG_BMSD_LCD_GAP_X
 #define APP_LCD_GAP_Y           CONFIG_BMSD_LCD_GAP_Y
-#define APP_LCD_BRIGHTNESS_PCT  CONFIG_BMSD_LCD_BRIGHTNESS_PCT
-#define APP_LCD_DIM_PCT         CONFIG_BMSD_LCD_DIM_PCT
 
 #ifdef CONFIG_BMSD_LCD_INVERT
 #define APP_LCD_INVERT 1
@@ -99,6 +138,7 @@
 #define APP_LCD_MIRROR_X 0
 #define APP_LCD_MIRROR_Y 0
 #endif
+#endif  // ST7789
 
 // --- BMS ---
 #ifdef CONFIG_BMSD_JK_FRAME_SOURCE_PC
@@ -138,17 +178,26 @@
 // --- Sanity checks ---
 static_assert(APP_PIN_BUTTON <= 7, "The button must be on an LP GPIO (0-7) to wake from deep sleep");
 
-// Every pin in use, as a bit mask (the optional LCD power pin only if set)
+// Every pin in use, as a bit mask (optional pins only if set)
 #define APP_PIN_BIT(p)  ((p) >= 0 ? (1ULL << (p)) : 0ULL)
-#define APP_PINS_SUM    (APP_PIN_BIT(APP_PIN_LCD_SCLK) + APP_PIN_BIT(APP_PIN_LCD_MOSI) + \
-                         APP_PIN_BIT(APP_PIN_LCD_CS) + APP_PIN_BIT(APP_PIN_LCD_DC) + \
-                         APP_PIN_BIT(APP_PIN_LCD_RST) + APP_PIN_BIT(APP_PIN_LCD_BL) + \
+#if APP_DISPLAY_SSD1309
+#define APP_DISPLAY_PINS_SUM  (APP_PIN_BIT(APP_PIN_OLED_SDA) + APP_PIN_BIT(APP_PIN_OLED_SCL) + \
+                               APP_PIN_BIT(APP_PIN_OLED_RST))
+#define APP_DISPLAY_PINS_MASK (APP_PIN_BIT(APP_PIN_OLED_SDA) | APP_PIN_BIT(APP_PIN_OLED_SCL) | \
+                               APP_PIN_BIT(APP_PIN_OLED_RST))
+#else
+#define APP_DISPLAY_PINS_SUM  (APP_PIN_BIT(APP_PIN_LCD_SCLK) + APP_PIN_BIT(APP_PIN_LCD_MOSI) + \
+                               APP_PIN_BIT(APP_PIN_LCD_CS) + APP_PIN_BIT(APP_PIN_LCD_DC) + \
+                               APP_PIN_BIT(APP_PIN_LCD_RST) + APP_PIN_BIT(APP_PIN_LCD_BL))
+#define APP_DISPLAY_PINS_MASK (APP_PIN_BIT(APP_PIN_LCD_SCLK) | APP_PIN_BIT(APP_PIN_LCD_MOSI) | \
+                               APP_PIN_BIT(APP_PIN_LCD_CS) | APP_PIN_BIT(APP_PIN_LCD_DC) | \
+                               APP_PIN_BIT(APP_PIN_LCD_RST) | APP_PIN_BIT(APP_PIN_LCD_BL))
+#endif
+#define APP_PINS_SUM    (APP_DISPLAY_PINS_SUM + \
                          APP_PIN_BIT(APP_PIN_LCD_PWR) + APP_PIN_BIT(APP_PIN_BUTTON) + \
                          APP_PIN_BIT(APP_PIN_BMS_RX) + APP_PIN_BIT(APP_PIN_BMS_TX) + \
                          APP_PIN_BIT(APP_PIN_VBAT_ADC))
-#define APP_PINS_MASK   (APP_PIN_BIT(APP_PIN_LCD_SCLK) | APP_PIN_BIT(APP_PIN_LCD_MOSI) | \
-                         APP_PIN_BIT(APP_PIN_LCD_CS) | APP_PIN_BIT(APP_PIN_LCD_DC) | \
-                         APP_PIN_BIT(APP_PIN_LCD_RST) | APP_PIN_BIT(APP_PIN_LCD_BL) | \
+#define APP_PINS_MASK   (APP_DISPLAY_PINS_MASK | \
                          APP_PIN_BIT(APP_PIN_LCD_PWR) | APP_PIN_BIT(APP_PIN_BUTTON) | \
                          APP_PIN_BIT(APP_PIN_BMS_RX) | APP_PIN_BIT(APP_PIN_BMS_TX) | \
                          APP_PIN_BIT(APP_PIN_VBAT_ADC))

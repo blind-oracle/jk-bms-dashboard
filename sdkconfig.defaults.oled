@@ -1,0 +1,21 @@
+# Defaults for the SSD1309 OLED environment (dfrobot_firebeetle2_esp32c6_oled),
+# layered on top of sdkconfig.defaults. They apply only when
+# sdkconfig.dfrobot_firebeetle2_esp32c6_oled does not exist yet: after editing
+# this file, delete that file.
+
+CONFIG_BMSD_DISPLAY_SSD1309=y
+
+# P-MOSFET high-side switch in the module's VCC line, gate on GPIO18 (GPIO low =
+# display on). The module's boost converter draws milliamps whenever powered.
+CONFIG_BMSD_PIN_LCD_PWR=18
+# CONFIG_BMSD_LCD_PWR_ACTIVE_HIGH is not set
+
+# 1-bpp pixel fonts for the 64x128 monochrome UI
+CONFIG_LV_FONT_UNSCII_8=y
+CONFIG_LV_FONT_UNSCII_16=y
+CONFIG_LV_FONT_DEFAULT_UNSCII_8=y
+# Fonts only the TFT UI uses
+CONFIG_LV_FONT_MONTSERRAT_14=n
+CONFIG_LV_FONT_MONTSERRAT_20=n
+CONFIG_LV_FONT_MONTSERRAT_28=n
+CONFIG_LV_FONT_MONTSERRAT_48=n

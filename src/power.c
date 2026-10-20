@@ -32,16 +32,10 @@ static const char *TAG = "power";
 #define CRASH_LIMIT         3           // consecutive crash/brownout resets before parking
 #define CRASH_COUNT_MAX     255
 #define EARLY_SAMPLE_MS     30          // early-boot button check
-#define LCD_RST_PULSE_MS    10
 #define RELEASE_POLL_MS     5
 #define LOG_FLUSH_MS        10
 #define FALLBACK_WAKE_US    (60LL * 1000 * 1000)
-#define DISPLAY_PIN_MAX     7
-
-typedef struct {
-    gpio_num_t pin;
-    uint32_t   level;
-} pin_level_t;
+#define DISPLAY_PIN_MAX     8
 
 typedef struct {
     uint32_t magic;
@@ -57,25 +51,8 @@ static RTC_DATA_ATTR uint8_t s_btn_stuck = 0;
 static RTC_NOINIT_ATTR crash_info_t s_crash;
 
 // ---- Pins ----
-
-// Display pins with the levels they hold in deep sleep, backlight first.
-// Panel left powered in SLPIN: CS, DC and RES high, clock and data low. With
-// the power switch every line is low, so the unpowered panel is not back-fed.
-static size_t display_sleep_pins(pin_level_t out[DISPLAY_PIN_MAX])
-{
-    const bool sw = APP_LCD_PWR_USED;
-    size_t n = 0;
-    if (sw) {
-        out[n++] = (pin_level_t){ .pin = (gpio_num_t)APP_PIN_LCD_PWR, .level = 1 - APP_LCD_PWR_ON_LEVEL };
-    }
-    out[n++] = (pin_level_t){ .pin = (gpio_num_t)APP_PIN_LCD_BL,   .level = sw ? 0 : APP_LCD_BL_OFF_LEVEL };
-    out[n++] = (pin_level_t){ .pin = (gpio_num_t)APP_PIN_LCD_CS,   .level = sw ? 0 : 1 };
-    out[n++] = (pin_level_t){ .pin = (gpio_num_t)APP_PIN_LCD_DC,   .level = sw ? 0 : 1 };
-    out[n++] = (pin_level_t){ .pin = (gpio_num_t)APP_PIN_LCD_RST,  .level = sw ? 0 : 1 };
-    out[n++] = (pin_level_t){ .pin = (gpio_num_t)APP_PIN_LCD_SCLK, .level = 0 };
-    out[n++] = (pin_level_t){ .pin = (gpio_num_t)APP_PIN_LCD_MOSI, .level = 0 };
-    return n;
-}
+// The display backend (display_st7789.c / display_ssd1309.c) lists its pins and
+// their deep-sleep levels: display_sleep_pins().
 
 // Plain GPIO output at level, detached from any SPI/LEDC/UART signal, with
 // any pad hold released. No gpio_config: it would reserve the pin and clash
@@ -105,10 +82,10 @@ static void hold_hiz(gpio_num_t pin)
 
 static void hold_display_pins(void)
 {
-    pin_level_t pins[DISPLAY_PIN_MAX];
-    const size_t n = display_sleep_pins(pins);
+    display_pin_level_t pins[DISPLAY_PIN_MAX];
+    const size_t n = display_sleep_pins(pins, DISPLAY_PIN_MAX);
     for (size_t i = 0; i < n; i++) {
-        hold_output(pins[i].pin, pins[i].level);
+        hold_output((gpio_num_t)pins[i].pin, pins[i].level);
     }
 }
 
@@ -118,34 +95,24 @@ static void hold_uart_pins(void)
     hold_hiz((gpio_num_t)APP_PIN_BMS_RX);
 }
 
-// Boot-loop guard: dark display without the display driver. A RES pulse puts
-// the ST7789 in its reset state (sleep-in, display off); CS is already high
-// by then. With the power switch the panel is simply left unpowered.
+// Boot-loop guard: dark display without the display driver. The backend makes
+// the panel dark (ST7789: RES pulse; OLED without a power switch: display-off
+// over I2C), then the sleep levels are held.
 static void park_display(void)
 {
-    pin_level_t pins[DISPLAY_PIN_MAX];
-    const size_t n = display_sleep_pins(pins);
-    for (size_t i = 0; i < n; i++) {
-        if (!APP_LCD_PWR_USED && pins[i].pin == APP_PIN_LCD_RST) {
-            continue;   // pulsed below
-        }
-        hold_output(pins[i].pin, pins[i].level);
-    }
-    if (!APP_LCD_PWR_USED) {
-        drive_output((gpio_num_t)APP_PIN_LCD_RST, 0);
-        esp_rom_delay_us(LCD_RST_PULSE_MS * 1000);
-        hold_output((gpio_num_t)APP_PIN_LCD_RST, 1);
-    }
+    display_park_panel();
+    hold_display_pins();
 }
 
 void power_release_holds(void)
 {
-    pin_level_t pins[DISPLAY_PIN_MAX];
-    const size_t n = display_sleep_pins(pins);
+    display_pin_level_t pins[DISPLAY_PIN_MAX];
+    const size_t n = display_sleep_pins(pins, DISPLAY_PIN_MAX);
     for (size_t i = 0; i < n; i++) {
-        gpio_set_level(pins[i].pin, pins[i].level);
-        gpio_set_direction(pins[i].pin, GPIO_MODE_OUTPUT);
-        gpio_hold_dis(pins[i].pin);
+        const gpio_num_t pin = (gpio_num_t)pins[i].pin;
+        gpio_set_level(pin, pins[i].level);
+        gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+        gpio_hold_dis(pin);
     }
 
     const gpio_num_t tx = (gpio_num_t)APP_PIN_BMS_TX;

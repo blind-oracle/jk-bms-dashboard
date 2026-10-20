@@ -157,19 +157,19 @@ static void show_feedback(const char *text, uint32_t duration_ms)
 static const char *toggle_block_reason(const jk_snapshot_t *snap, int64_t now)
 {
     if (!s_app.display_ok) {
-        return "No display";    // never switch the output without the hold/arm cards
+        return ui_text(UI_TXT_NO_DISPLAY);    // never switch the output without the hold/arm cards
     }
     if (!snap->has_data) {
-        return "No data";
+        return ui_text(UI_TXT_NO_DATA);
     }
     if (snap->offline) {
-        return "BMS offline";
+        return ui_text(UI_TXT_BMS_OFFLINE);
     }
     if (now - snap->last_ok_us >= BMS_FRESH_US) {
-        return "No fresh data";
+        return ui_text(UI_TXT_NO_FRESH);
     }
     if (bms_command_pending() || s_app.cmd_pending) {
-        return "Busy";
+        return ui_text(UI_TXT_BUSY);
     }
     return NULL;
 }
@@ -233,7 +233,7 @@ static void ui_refresh(void)
     }
     ui_update(m);
     if (s_app.vbat_msg_pending && ui_overlay_current() == UI_OVL_NONE) {
-        ui_overlay_message(UI_OVL_INFO, "Board battery low", true, MSG_VBAT_MS);
+        ui_overlay_message(UI_OVL_INFO, ui_text(UI_TXT_VBAT_LOW), true, MSG_VBAT_MS);
         s_app.vbat_msg_pending = false;
     }
     display_unlock();
@@ -276,7 +276,7 @@ static void warning_update(int64_t idle_us)
         return;
     }
     if (ui_lock()) {
-        snprintf(text, sizeof(text), "Sleeping in %d s", left_s);
+        ui_text_sleeping(text, sizeof(text), left_s);
         ui_overlay_message(UI_OVL_INFO, text, false, 0);
         display_unlock();
         s_app.warning_shown_s = left_s;
@@ -322,11 +322,11 @@ static void on_hold_start(void)
     s_app.hold_target = !jk_dsg_on(&s_snap.data);
     s_app.hold_stale_us = 0;
     if (s_app.hold_target) {
-        s_app.hold_label = "Hold: enable output";
+        s_app.hold_label = ui_text(UI_TXT_HOLD_ENABLE);
     } else if (jk_dsg_state(&s_snap.data) == JK_DSG_TRIP) {
-        s_app.hold_label = "Hold: disable output (tripped)";
+        s_app.hold_label = ui_text(UI_TXT_HOLD_DISABLE_TRIP);
     } else {
-        s_app.hold_label = "Hold: disable output";
+        s_app.hold_label = ui_text(UI_TXT_HOLD_DISABLE);
     }
     s_app.hold_pct = -1;
     hold_draw(0);
@@ -337,7 +337,7 @@ static void on_armed(void)
     if (!s_app.hold_active) {
         return;
     }
-    s_app.hold_label = s_app.hold_target ? "Release to switch output ON" : "Release to switch output OFF";
+    s_app.hold_label = ui_text(s_app.hold_target ? UI_TXT_RELEASE_ON : UI_TXT_RELEASE_OFF);
     hold_draw(100);
 }
 
@@ -351,7 +351,7 @@ static void on_long_release(void)
         // The "Release to switch output ..." card was never drawn (LVGL busy,
         // or BTN_ARMED lost): do not act on a prompt the user did not see
         ESP_LOGW(TAG, "Arm card not shown, toggle refused");
-        show_feedback("Cancelled", MSG_CANCEL_MS);
+        show_feedback(ui_text(UI_TXT_CANCELLED), MSG_CANCEL_MS);
         return;
     }
 
@@ -364,13 +364,13 @@ static void on_long_release(void)
     }
     if (!s_app.bms_ok || !jk_bms_set_discharge(s_app.hold_target)) {
         ESP_LOGW(TAG, "Discharge command refused");
-        show_feedback("Busy", MSG_REASON_MS);
+        show_feedback(ui_text(UI_TXT_BUSY), MSG_REASON_MS);
         return;
     }
     s_app.cmd_pending = true;
     s_app.cmd_idle_us = 0;
     ESP_LOGI(TAG, "Switching the discharge output %s", s_app.hold_target ? "ON" : "OFF");
-    show_feedback("Switching output...", 0);
+    show_feedback(ui_text(UI_TXT_SWITCHING), 0);
 }
 
 static void on_cancel(void)
@@ -380,7 +380,7 @@ static void on_cancel(void)
     }
     s_app.hold_active = false;
     ESP_LOGI(TAG, "Output toggle cancelled");
-    show_feedback("Cancelled", MSG_CANCEL_MS);
+    show_feedback(ui_text(UI_TXT_CANCELLED), MSG_CANCEL_MS);
 }
 
 static void on_button(app_event_type_t type)
@@ -426,30 +426,30 @@ static void on_dsg_result(const app_event_t *ev)
     switch (ev->dsg_result) {
     case APP_DSG_RESULT_OK:
         if (!ev->dsg_target) {
-            text = "Output OFF";
+            text = ui_text(UI_TXT_OUTPUT_OFF);
         } else if (ev->dsg_state == JK_DSG_TRIP) {
-            text = "Enabled - blocked by BMS";
+            text = ui_text(UI_TXT_BLOCKED);
         } else {
-            text = "Output ON";
+            text = ui_text(UI_TXT_OUTPUT_ON);
         }
         error = false;
         duration_ms = MSG_OK_MS;
         break;
     case APP_DSG_RESULT_NO_REPLY:
-        text = "No reply from BMS";
+        text = ui_text(UI_TXT_NO_REPLY);
         break;
     case APP_DSG_RESULT_UNKNOWN:
-        text = "Sent - state unknown";
+        text = ui_text(UI_TXT_STATE_UNKNOWN);
         break;
     case APP_DSG_RESULT_NOT_CONFIRMED:
     default:
         // The state here was read back after the write
         if (ev->dsg_state == JK_DSG_ON) {
-            text = "Not confirmed - output is ON";
+            text = ui_text(UI_TXT_NOT_CONF_ON);
         } else if (ev->dsg_state == JK_DSG_TRIP) {
-            text = "Not confirmed - output still enabled";
+            text = ui_text(UI_TXT_NOT_CONF_TRIP);
         } else {
-            text = "Not confirmed - output is OFF";
+            text = ui_text(UI_TXT_NOT_CONF_OFF);
         }
         break;
     }
@@ -501,7 +501,7 @@ static void check_stale_state(int64_t now)
         } else if (now - s_app.hold_stale_us >= HOLD_STALE_US) {
             ESP_LOGW(TAG, "Hold ended without a release event");
             s_app.hold_active = false;
-            show_feedback("Cancelled", MSG_CANCEL_MS);
+            show_feedback(ui_text(UI_TXT_CANCELLED), MSG_CANCEL_MS);
         }
     }
     if (s_app.cmd_pending) {
